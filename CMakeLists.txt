@@ -32,16 +32,13 @@ find_package(Eigen3 3.3 REQUIRED)
 
 #Add the project sources
 file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-set(MYSOURCESDIR "/home/iason/Coding/Libraries/MySources")
-file(GLOB MYSOURCES ${MYSOURCESDIR}/vcgtrimesh.hpp ${MYSOURCESDIR}/vcgtrimesh.cpp)
 
-add_executable(${PROJECT_NAME} ${SOURCES} ${MYSOURCES} )
+add_executable(${PROJECT_NAME} ${SOURCES} )
 
 
 
 target_include_directories(${PROJECT_NAME}
         PRIVATE ${vcglib_devel_SOURCE_DIR}
-        PRIVATE ${MYSOURCESDIR}
         )
 
 #Use C++17

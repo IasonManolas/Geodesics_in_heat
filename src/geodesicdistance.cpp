@@ -144,7 +144,7 @@ void GeodesicDistance::computeDivergence() {
 
 Eigen::VectorXd
 GeodesicDistance::solvePhi(const std::unordered_set<VertexIndex> &sourcesVi) {
-  auto phi = la_cotan.solve(m_divergence);
+  Eigen::VectorXd phi = la_cotan.solve(m_divergence);
 
   Eigen::VectorXd distances(m.VN());
   const double sourceDistance = phi(*sourcesVi.begin(), 0);
@@ -170,7 +170,7 @@ GeodesicDistance::solvePhi(const std::unordered_set<VertexIndex> &sourcesVi) {
   //      distances(vi) = min_val;
   //  }
 
-  return distances;
+  //  return distances;
 }
 
 Eigen::VectorXd GeodesicDistance::computeGeodesicDistances(
@@ -180,12 +180,8 @@ Eigen::VectorXd GeodesicDistance::computeGeodesicDistances(
   //  assert(sourcesVi < m.VN() - 1);
 
   updateKroneckerDelta(sourcesVi);
-  std::cout << "Here0" << std::endl;
   solveCotanLaplace();
-  std::cout << "Here1" << std::endl;
   computeUnitGradient();
-  std::cout << "Here2" << std::endl;
   computeDivergence();
-  std::cout << "Here3" << std::endl;
   return solvePhi(sourcesVi);
 }
