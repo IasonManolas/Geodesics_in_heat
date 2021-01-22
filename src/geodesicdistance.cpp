@@ -1,4 +1,6 @@
 #include "geodesicdistance.hpp"
+#include "polyscope/polyscope.h"
+#include "polyscope/surface_mesh.h"
 #include "vcg/complex/algorithms/mesh_to_matrix.h"
 #include "vcg/complex/algorithms/stat.h"
 #include <unordered_set>
@@ -11,13 +13,16 @@ GeodesicDistance::GeodesicDistance(ConstVCGTriMesh &m) : m(m) {
 
 void GeodesicDistance::init() {
   assert(m.VN() != 0 && m.FN() != 0);
+  std::cout << "Initializing.." << std::endl;
 
   // compute cotangent operator L_C
+  std::cout << "Computing cotangent matrix.." << std::endl;
   std::vector<std::pair<int, int>> laplacianMatrixIndices;
   std::vector<double> laplacianMatrixEntries;
   vcg::tri::MeshToMatrix<VCGTriMesh>::GetLaplacianMatrix(
       m, laplacianMatrixIndices, laplacianMatrixEntries, true, 1, false);
   assert(laplacianMatrixIndices.size() == laplacianMatrixEntries.size());
+  std::cout << "Populating sparse cotangent matrix.." << std::endl;
   Eigen::SparseMatrix<double> Lc(m.VN(), m.VN());
   const size_t numberOfNonZeroEntriesLc = laplacianMatrixEntries.size();
   std::vector<Eigen::Triplet<double>> LcTriplets(numberOfNonZeroEntriesLc);
@@ -32,6 +37,7 @@ void GeodesicDistance::init() {
   //  Eigen::MatrixXd LcDense(Lc);
 
   // compute mass matrix A
+  std::cout << "Computing mass matrix.." << std::endl;
   std::vector<std::pair<int, int>> massMatrixIndices;
   std::vector<double> massMatrixEntries;
   vcg::tri::MeshToMatrix<VCGTriMesh>::MassMatrixEntry(m, massMatrixIndices,
@@ -53,15 +59,25 @@ void GeodesicDistance::init() {
   m_timestep = averageEdgeLength * averageEdgeLength;
 
   // factor first equation
+  std::cout << "Prefactoring the heat equation.." << std::endl;
   Eigen::SparseMatrix<double> B, B0;
   B0 = m_timestep * Lc;
   B = A /*..toDenseMatrix()*/ + B0; // shouldnt this be A-B0?
                                     //  Eigen::MatrixXd BDense(B);
-  la.compute(B);                    // not sure what this does
-  isInitialized = true;
+  la.compute(B);
+  if (la.info() != Eigen::Success) {
+    std::cerr << "Prefactoring the heat equation failed." << std::endl;
+    std::terminate();
+  }
 
   // factor the poisson problem
+  std::cout << "Prefactoring the poisson's equation.." << std::endl;
   la_cotan.compute(Lc);
+  if (la_cotan.info() != Eigen::Success) {
+    std::cerr << "Prefactoring the poisson equation failed." << std::endl;
+    std::terminate();
+  }
+  isInitialized = true;
 }
 
 void GeodesicDistance::updateKroneckerDelta(
@@ -83,7 +99,6 @@ void GeodesicDistance::computeUnitGradient() {
   if (m_unitGradient.empty()) {
     m_unitGradient.resize(m.FN());
   }
-
   for (size_t fi = 0; fi < m.FN(); fi++) {
     VCGTriMesh::FaceType &f = m.face[fi];
     const double faceArea = vcg::DoubleArea(m.face[fi]) / 2;
@@ -116,6 +131,11 @@ void GeodesicDistance::computeDivergence() {
   if (m_divergence.rows() == 0) {
     m_divergence.resize(m.VN());
   }
+  m_divergence << Eigen::VectorXd::Zero(m.VN());
+
+  // open a file in write mode.
+  std::ofstream outfile;
+  //  outfile.open("divergence.dat");
   for (size_t fi = 0; fi < m.FN(); fi++) {
     const VCGTriMesh::FaceType &f = m.face[fi];
     const VCGTriMesh::VertexPointer &v0 = f.cV(0);
@@ -133,6 +153,24 @@ void GeodesicDistance::computeDivergence() {
 
     const VCGTriMesh::CoordType &X_fi = m_unitGradient[fi];
     // continue here
+    //    auto i_entry = ((X_fi * e01) * cotan2 + (X_fi * (-e20)) * cotan1);
+    //    auto j_entry = ((X_fi * e12) * cotan0 + (X_fi * (-e01)) * cotan2);
+    //    auto k_entry = ((X_fi * e20) * cotan1 + (X_fi * (-e12)) * cotan0);
+    //    outfile << "face " << fi << std::endl;
+    //    outfile << "i entry " << i_entry << std::endl;
+    //    outfile << "j entry " << j_entry << std::endl;
+    //    outfile << "k entry " << k_entry << std::endl;
+    //    auto vi0 = m.getIndex(v0);
+    //    auto vi1 = m.getIndex(v1);
+    //    auto vi2 = m.getIndex(v2);
+    //    if (vi0 == 8) {
+    //      std::cout << "fi " << fi << " " << i_entry << std::endl;
+    //    } else if (vi1 == 8) {
+    //      std::cout << "fi " << fi << " " << j_entry << std::endl;
+    //    } else if (vi2 == 8) {
+    //      std::cout << "fi " << fi << " " << k_entry << std::endl;
+    //    }
+
     m_divergence(m.getIndex(v0)) +=
         0.5 * ((X_fi * e01) * cotan2 + (X_fi * (-e20)) * cotan1);
     m_divergence(m.getIndex(v1)) +=
@@ -140,6 +178,13 @@ void GeodesicDistance::computeDivergence() {
     m_divergence(m.getIndex(v2)) +=
         0.5 * ((X_fi * e20) * cotan1 + (X_fi * (-e12)) * cotan0);
   }
+  std::cout << "vertex " << debugVi << " " << m_divergence(debugVi)
+            << std::endl;
+
+  //  for (size_t vi = 0; vi < m.VN(); vi++) {
+  //    outfile << "vertex " << vi << " " << m_divergence(vi) << std::endl;
+  //  }
+  //  outfile.close();
 }
 
 Eigen::VectorXd

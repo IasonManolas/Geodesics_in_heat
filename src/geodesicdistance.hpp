@@ -34,6 +34,8 @@ private:
   void computeUnitGradient();
   void computeDivergence();
   Eigen::VectorXd solvePhi(const std::unordered_set<VertexIndex> &sourcesVi);
+
+  int debugVi{8};
 };
 
 #endif // GEODESICDISTANCE_HPP
