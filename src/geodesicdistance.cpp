@@ -1,20 +1,30 @@
 #include "geodesicdistance.hpp"
-#include "polyscope/polyscope.h"
-#include "polyscope/surface_mesh.h"
+//#include "polyscope/polyscope.h"
+//#include "polyscope/surface_mesh.h"
 #include "vcg/complex/algorithms/mesh_to_matrix.h"
 #include "vcg/complex/algorithms/stat.h"
+#include <igl/slice.h>
 #include <unordered_set>
 
 GeodesicDistance::GeodesicDistance(ConstVCGTriMesh &m) : m(m) {
   vcg::tri::RequirePerFaceNormal(m);
   vcg::tri::UpdateNormal<VCGTriMesh>::PerFaceNormalized(m);
+  // compute timestep
+  averageEdgeLength =
+      vcg::tri::Stat<VCGTriMesh>::ComputeEdgeLengthSum(m) / m.EN();
+  m_timestep = averageEdgeLength * averageEdgeLength;
   init();
+  precompute();
+}
+
+void GeodesicDistance::setMFactor(double m) {
+  m_timestep = averageEdgeLength * averageEdgeLength * m;
+  precompute();
 }
 
 void GeodesicDistance::init() {
   assert(m.VN() != 0 && m.FN() != 0);
   std::cout << "Initializing.." << std::endl;
-
   // compute cotangent operator L_C
   std::cout << "Computing cotangent matrix.." << std::endl;
   std::vector<std::pair<int, int>> laplacianMatrixIndices;
@@ -23,7 +33,7 @@ void GeodesicDistance::init() {
       m, laplacianMatrixIndices, laplacianMatrixEntries, true, 1, false);
   assert(laplacianMatrixIndices.size() == laplacianMatrixEntries.size());
   std::cout << "Populating sparse cotangent matrix.." << std::endl;
-  Eigen::SparseMatrix<double> Lc(m.VN(), m.VN());
+  Lc.resize(m.VN(), m.VN());
   const size_t numberOfNonZeroEntriesLc = laplacianMatrixEntries.size();
   std::vector<Eigen::Triplet<double>> LcTriplets(numberOfNonZeroEntriesLc);
   for (size_t nonZeroEntryIndex = 0;
@@ -44,7 +54,7 @@ void GeodesicDistance::init() {
                                                       massMatrixEntries, false);
   assert(massMatrixIndices.size() == massMatrixEntries.size());
   Eigen::VectorXd A_vec(m.VN());
-  Eigen::SparseMatrix<double> A(m.VN(), m.VN());
+  A.resize(m.VN(), m.VN());
   for (size_t vi = 0; vi < m.VN(); vi++) {
     assert(massMatrixIndices[vi].first == vi &&
            massMatrixIndices[vi].second == vi);
@@ -52,12 +62,11 @@ void GeodesicDistance::init() {
   }
 
   A = A_vec.asDiagonal();
+  isInitialized = true;
+}
 
-  // compute timestep
-  const double averageEdgeLength =
-      vcg::tri::Stat<VCGTriMesh>::ComputeEdgeLengthSum(m) / m.EN();
-  m_timestep = averageEdgeLength * averageEdgeLength;
-
+void GeodesicDistance::precompute() {
+  assert(isInitialized);
   // factor first equation
   std::cout << "Prefactoring the heat equation.." << std::endl;
   Eigen::SparseMatrix<double> B, B0;
@@ -77,7 +86,6 @@ void GeodesicDistance::init() {
     std::cerr << "Prefactoring the poisson equation failed." << std::endl;
     std::terminate();
   }
-  isInitialized = true;
 }
 
 void GeodesicDistance::updateKroneckerDelta(
@@ -178,8 +186,8 @@ void GeodesicDistance::computeDivergence() {
     m_divergence(m.getIndex(v2)) +=
         0.5 * ((X_fi * e20) * cotan1 + (X_fi * (-e12)) * cotan0);
   }
-  std::cout << "vertex " << debugVi << " " << m_divergence(debugVi)
-            << std::endl;
+  //  std::cout << "vertex " << debugVi << " " << m_divergence(debugVi)
+  //            << std::endl;
 
   //  for (size_t vi = 0; vi < m.VN(); vi++) {
   //    outfile << "vertex " << vi << " " << m_divergence(vi) << std::endl;
@@ -228,5 +236,14 @@ Eigen::VectorXd GeodesicDistance::computeGeodesicDistances(
   solveCotanLaplace();
   computeUnitGradient();
   computeDivergence();
-  return solvePhi(sourcesVi);
+  Eigen::VectorXd D = solvePhi(sourcesVi);
+  Eigen::VectorXi gamma =
+      (Eigen::VectorXi(1, 1) << *sourcesVi.begin()).finished();
+  Eigen::VectorXd Dgamma;
+  igl::slice(D, gamma, Dgamma);
+  D.array() -= Dgamma.mean();
+  if (D.mean() < 0) {
+    D = -D;
+  }
+  return D;
 }

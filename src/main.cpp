@@ -1,114 +1,223 @@
 #include "geodesicdistance.hpp"
-#include "polyscope/point_cloud.h"
-#include "polyscope/polyscope.h"
-#include "polyscope/surface_mesh.h"
 #include "vcgtrimesh.hpp"
 #include <filesystem>
-
-void addGaussianNoise(VCGTriMesh &m) {
-  std::normal_distribution<double> dist(0, 1);
-  std::default_random_engine generator;
-  for (int vi = 0; vi < m.VN(); vi++) {
-    m.vert[vi].P()[0] = m.vert[vi].P()[0] + dist(generator);
-    m.vert[vi].P()[1] = m.vert[vi].P()[1] + dist(generator);
-    m.vert[vi].P()[2] = m.vert[vi].P()[2] + dist(generator);
+#include <igl/avg_edge_length.h>
+#include <igl/bounding_box_diagonal.h>
+#include <igl/heat_geodesics.h>
+#include <igl/isolines_map.h>
+#include <igl/opengl/create_shader_program.h>
+#include <igl/opengl/destroy_shader_program.h>
+#include <igl/opengl/glfw/Viewer.h>
+#include <igl/opengl/glfw/imgui/ImGuiMenu.h>
+#include <igl/read_triangle_mesh.h>
+#include <igl/triangulated_grid.h>
+#include <igl/unproject_onto_mesh.h>
+#include <iostream>
+#include <vcg/complex/algorithms/update/bounding.h>
+#include <vcg/complex/algorithms/update/position.h>
+void set_colormap(igl::opengl::glfw::Viewer &viewer) {
+  const int num_intervals = 30;
+  Eigen::MatrixXd CM(num_intervals, 3);
+  // Colormap texture
+  for (int i = 0; i < num_intervals; i++) {
+    double t = double(num_intervals - i - 1) / double(num_intervals - 1);
+    CM(i, 0) = std::max(std::min(2.0 * t - 0.0, 1.0), 0.0);
+    CM(i, 1) = std::max(std::min(2.0 * t - 1.0, 1.0), 0.0);
+    CM(i, 2) = std::max(std::min(6.0 * t - 5.0, 1.0), 0.0);
   }
+  igl::isolines_map(Eigen::MatrixXd(CM), CM);
+  viewer.data().set_colormap(CM);
 }
-int main() {
-  //  const std::string meshFilepath = "/home/iason/Models/Armadillo.ply";
-  //  const std::string meshFilepath =
-  //  "/home/iason/Models/Armadillo_drilled.ply"; const std::string meshFilepath
-  //  = "/home/iason/Models/buste.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/buste_150K.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/Greek_Sculpture.off"; const std::string meshFilepath =
-  //  "/home/iason/Models/fertility.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/bunny.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/horse.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/horse_1M.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/horse_6M.ply"; const std::string meshFilepath =
-  //  "/home/iason/Models/vaselion.ply";
-  //    const std::string meshFilepath = "/home/iason/Models/bimba.ply";
-  //  const std::string meshFilepath = "/home/iason/Models/bimba_100K.ply";
-  //  const std::string meshFilepath = "/home/iason/Models/happy_remeshed.ply";
+
+int main(int argc, char *argv[]) {
+  // Create the peak height field
+  Eigen::MatrixXi F;
+  Eigen::MatrixXd V;
+  // Performance table
+  //  const std::string meshFilepath = "/home/iason/Models/vaselion.ply";
+  //  const std::string meshFilepath = "/home/iason/Models/bimba.ply";
+  //  const std::string meshFilepath = "/home/iason/Models/buste.ply";
+  //  const std::string meshFilepath = "/home/iason/Models/fertility.ply";
   //  const std::string meshFilepath = "/home/iason/Models/dragon.ply";
-  //    const std::string meshFilepath = "/home/iason/Models/bunny_low.ply";
-  const std::string meshFilepath = "/home/iason/Models/bunny_low_drilled.ply";
-
-  //  const std::string meshFilepath = "/home/iason/Models/tetrahedron.ply";
   //  const std::string meshFilepath =
-  //  "/home/iason/Models/fertility_highRes.obj";
-  VCGTriMesh m(meshFilepath);
-  const std::string meshName = std::filesystem::path(meshFilepath).stem();
-  std::cout << "Number of verts:" << m.VN() << std::endl;
-  std::cout << "Number of triangles:" << m.FN() << std::endl;
+  //  "/home/iason/Models/fertility_highRes.obj"; const std::string meshFilepath
+  //  = "/home/iason/Models/horse_1M.ply";
 
-  // Compute geodesic distances
-  auto begin = std::chrono::high_resolution_clock::now();
-  GeodesicDistance geodesicDistanceComputer(m);
-  auto end = std::chrono::high_resolution_clock::now();
-  auto precomputeTime =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
-  std::cout << "Precompute in " << precomputeTime.count() / 1000.0 << " seconds"
-            << std::endl;
-  const size_t viSource = 0; // fert
-  //  const size_t viSource = 119612; // fert
-  //  const size_t viSource = 44023; // buste
-  //  const size_t viSource = 13431; // horse
-  //  const size_t viSource = 7174; // bimba
-  //  const size_t viSource = 33295; // vaselion
-  //  const size_t viSource = 287; // bunny
-  //    const size_t viSource = 2176; // greek sculp
-  //  const size_t viSource = 88459; // Armadillo
-  //  std::cout << "source: " << m.vert[viSource].cP()[0] << " "
-  //            << m.vert[viSource].cP()[1] << " " << m.vert[viSource].cP()[2]
-  //            << std::endl;
-  std::unordered_map<VertexIndex, double> distanceMap;
-  std::unordered_set<VertexIndex> sourcesVi;
-  sourcesVi.insert(viSource);
-  Eigen::VectorXd distances =
-      geodesicDistanceComputer.computeGeodesicDistances(sourcesVi, distanceMap);
-  //  for (int i = 0; i < m.VN(); i++) {
-  //    std::cout << "v" << i << "  is at distance " << distances(i)
-  //              << " to v" + std::to_string(viSource) << std::endl;
-  //  }
-  end = std::chrono::high_resolution_clock::now();
-  auto elapsedTotal =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
-  std::cout << "Solving in "
-            << elapsedTotal.count() / 1000.0 - precomputeTime.count() / 1000.0
-            << " seconds" << std::endl;
-  std::cout << "Computed distances in " << elapsedTotal.count() / 1000.0
-            << " seconds" << std::endl;
-  polyscope::init();
-  polyscope::registerSurfaceMesh(meshName, m.getVertices(), m.getFaces());
+  const std::string meshFilepath = "/home/iason/Models/Armadillo_drilled.obj";
 
-  polyscope::getSurfaceMesh(meshName)->addVertexDistanceQuantity(meshName,
-                                                                 distances);
+  //  const std::string meshFilepath = "/home/iason/Models/bunny.obj";
+  //  const std::string meshFilepath = "/home/iason/Models/bunny_refined.obj";
 
-  polyscope::getSurfaceMesh(meshName)->addVertexScalarQuantity("Colors",
-                                                               distances);
-  std::vector<std::array<double, 3>> sourcePointCoords(sourcesVi.size());
-  int sourceIndex = 0;
-  for (auto sourceVi : sourcesVi) {
-    sourcePointCoords[sourceIndex][0] = m.vert[sourceVi].cP()[0];
-    sourcePointCoords[sourceIndex][1] = m.vert[sourceVi].cP()[1];
-    sourcePointCoords[sourceIndex][2] = m.vert[sourceVi].cP()[2];
-    sourceIndex++;
+  //  const std::string meshFilepath = "/home/iason/Models/torus.ply";
+
+  //  const std::string meshFilepath = "/home/iason/Models/bunny.ply";
+  //  const std::string meshFilepath =
+  //  "/home/iason/Models/bunny_remeshed_300k.ply"	;
+  //  const std::string meshFilepath = "/home/iason/Models/Armadillo.ply";
+
+  //  const std::string meshFilepath = "/home/iason/Models/bunny.obj";
+  //  const std::string meshFilepath =
+  //  "/home/iason/Models/bunny_remeshed_300k.ply";
+  //  const std::string meshFilepath = "/home/iason/Models/fertility_20k.ply";
+  //    const std::string meshFilepath = "/home/iason/Models/bimba.ply";
+
+  if (!std::filesystem::exists(std::filesystem::path(meshFilepath))) {
+    std::cerr << meshFilepath << " does not exist." << std::endl;
+    std::terminate();
   }
-  polyscope::registerPointCloud("Source points", sourcePointCoords);
-  polyscope::show();
+  igl::read_triangle_mesh(meshFilepath, V, F);
 
-  VCGTriMesh m_noisy;
-  vcg::tri::Append<VCGTriMesh, VCGTriMesh>::MeshCopy(m_noisy, m);
-  addGaussianNoise(m_noisy);
-  polyscope::registerSurfaceMesh(meshName + "_withNoise", m_noisy.getVertices(),
-                                 m_noisy.getFaces());
-  GeodesicDistance geodesicDistanceComputer_noise(m_noisy);
-  Eigen::VectorXd distances_noise =
-      geodesicDistanceComputer_noise.computeGeodesicDistances(sourcesVi,
-                                                              distanceMap);
-  polyscope::getSurfaceMesh(meshName)->addVertexDistanceQuantity(
-      meshName, distances_noise);
+  // Precomputation
+  igl::HeatGeodesicsData<double> data;
+  double hSquared = std::pow(igl::avg_edge_length(V, F), 2);
+  double m = 1;
+  double t = m * hSquared;
+  const auto precompute = [&]() {
+    if (!igl::heat_geodesics_precompute(V, F, t, data)) {
+      std::cerr << "Error: heat_geodesics_precompute failed." << std::endl;
+      exit(EXIT_FAILURE);
+    };
+  };
+  //  precompute();
 
-  polyscope::show();
+  const double bboxDiag = igl::bounding_box_diagonal(V);
+  VCGTriMesh mesh(meshFilepath);
+  vcg::tri::UpdatePosition<VCGTriMesh>::Scale(mesh, 100 / bboxDiag);
+  GeodesicDistance geodesicDistanceComputer(mesh);
+  std::unordered_set<VertexIndex> sourcesVi;
+
+  igl::opengl::glfw::Viewer viewer;
+  bool useIgl = false;
+  bool down_on_mesh = false;
+  const auto update = [&]() -> bool {
+    int fid;
+    Eigen::Vector3f bc;
+    // Cast a ray in the view direction starting from the mouse position
+    double x = viewer.current_mouse_x;
+    double y = viewer.core().viewport(3) - viewer.current_mouse_y;
+    if (igl::unproject_onto_mesh(Eigen::Vector2f(x, y), viewer.core().view,
+                                 viewer.core().proj, viewer.core().viewport, V,
+                                 F, fid, bc)) {
+      Eigen::VectorXd D;
+      // if big mesh, just use closest vertex. Otherwise, blend distances to
+      // vertices of face using barycentric coordinates.
+      if (F.rows() > 100000) {
+        // 3d position of hit
+        const Eigen::RowVector3d m3 = V.row(F(fid, 0)) * bc(0) +
+                                      V.row(F(fid, 1)) * bc(1) +
+                                      V.row(F(fid, 2)) * bc(2);
+        int cid = 0;
+        Eigen::Vector3d((V.row(F(fid, 0)) - m3).squaredNorm(),
+                        (V.row(F(fid, 1)) - m3).squaredNorm(),
+                        (V.row(F(fid, 2)) - m3).squaredNorm())
+            .minCoeff(&cid);
+        const int vid = F(fid, cid);
+        if (useIgl) {
+          igl::heat_geodesics_solve(
+              data, (Eigen::VectorXi(1, 1) << vid).finished(), D);
+        } else {
+          sourcesVi.clear();
+          sourcesVi.insert(vid);
+          std::unordered_map<VertexIndex, double> distanceMap;
+          D = geodesicDistanceComputer.computeGeodesicDistances(sourcesVi,
+                                                                distanceMap);
+        }
+      } else {
+        D = Eigen::VectorXd::Zero(V.rows());
+        for (int cid = 0; cid < 3; cid++) {
+          const int vid = F(fid, cid);
+          Eigen::VectorXd Dc;
+          if (useIgl) {
+            igl::heat_geodesics_solve(
+                data, (Eigen::VectorXi(1, 1) << vid).finished(), Dc);
+          } else {
+            sourcesVi.clear();
+            sourcesVi.insert(vid);
+            std::unordered_map<VertexIndex, double> distanceMap;
+            Dc = geodesicDistanceComputer.computeGeodesicDistances(sourcesVi,
+                                                                   distanceMap);
+          }
+          D += Dc * bc(cid);
+        }
+      }
+      viewer.data().set_data(D);
+      return true;
+    }
+    return false;
+  };
+  viewer.callback_mouse_down = [&](igl::opengl::glfw::Viewer &viewer, int,
+                                   int) -> bool {
+    if (update()) {
+      down_on_mesh = true;
+      return true;
+    }
+    return false;
+  };
+  viewer.callback_mouse_move = [&](igl::opengl::glfw::Viewer &viewer, int,
+                                   int) -> bool {
+    if (down_on_mesh) {
+      update();
+      return true;
+    }
+    return false;
+  };
+  viewer.callback_mouse_up = [&down_on_mesh](igl::opengl::glfw::Viewer &viewer,
+                                             int, int) -> bool {
+    down_on_mesh = false;
+    return false;
+  };
+  std::cout << R"(Usage:
+    [click]  Click on shape to pick new geodesic distance source
+    ,/.      Decrease/increase t by factor of 10.0
+    D,d      Toggle using intrinsic Delaunay discrete differential operators
+  )";
+
+  viewer.callback_key_pressed = [&](igl::opengl::glfw::Viewer & /*viewer*/,
+                                    unsigned int key, int mod) -> bool {
+    switch (key) {
+    default:
+      return false;
+    case 'c':
+    case 'C':
+      useIgl = !useIgl;
+      if (useIgl) {
+        std::cout << "Using igl" << std::endl;
+        precompute();
+      } else {
+        std::cout << "Using my implemenetation" << std::endl;
+        geodesicDistanceComputer.setMFactor(m);
+      }
+      update();
+      break;
+    case 'D':
+    case 'd':
+      data.use_intrinsic_delaunay = !data.use_intrinsic_delaunay;
+      std::cout << (data.use_intrinsic_delaunay ? "" : "not ")
+                << "using intrinsic delaunay..." << std::endl;
+      precompute();
+      update();
+      break;
+    case '.':
+    case ',':
+      m *= (key == '.' ? 10.0 : 0.1);
+      std::cout << "m: " << m << std::endl;
+      t = m * hSquared;
+      if (useIgl) {
+        precompute();
+      } else {
+        geodesicDistanceComputer.setMFactor(m);
+      }
+      update();
+      break;
+    }
+    return true;
+  };
+
+  // Show mesh
+  viewer.data().set_mesh(V, F);
+  viewer.data().set_data(Eigen::VectorXd::Zero(V.rows()));
+
+  set_colormap(viewer);
+  viewer.data().show_lines = false;
+  viewer.launch();
 }

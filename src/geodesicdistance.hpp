@@ -7,6 +7,7 @@
 
 using ConstVCGTriMesh = VCGTriMesh;
 class GeodesicDistance {
+
   ConstVCGTriMesh &m;
   double m_timestep;
   Eigen::SparseVector<double> m_kroneckerDelta;
@@ -16,26 +17,34 @@ class GeodesicDistance {
 
   bool isInitialized{false};
 
-  void init();
+  void precompute();
 
 public:
   GeodesicDistance(ConstVCGTriMesh &m);
-  void setMesh(const VCGTriMesh &m);
+  void setMesh(ConstVCGTriMesh &m);
 
   Eigen::VectorXd
   computeGeodesicDistances(const std::unordered_set<VertexIndex> &sourcesVi,
                            std::unordered_map<VertexIndex, double> &distances);
 
+  void setMFactor(double m);
+
+  void setMesh(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F);
+
 private:
   void updateKroneckerDelta(const std::unordered_set<VertexIndex> &sourcesVi);
-  Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> la;
-  Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> la_cotan;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> la;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> la_cotan;
   void solveCotanLaplace();
   void computeUnitGradient();
   void computeDivergence();
   Eigen::VectorXd solvePhi(const std::unordered_set<VertexIndex> &sourcesVi);
+  Eigen::SparseMatrix<double> Lc;
+  Eigen::SparseMatrix<double> A;
 
+  double averageEdgeLength;
   int debugVi{8};
+  void init();
 };
 
 #endif // GEODESICDISTANCE_HPP

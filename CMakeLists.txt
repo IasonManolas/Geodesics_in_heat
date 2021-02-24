@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-project(HeatMethod)
+project(HeatMethod_igl)
 
 #Add the project cmake scripts to the module path
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -19,13 +19,27 @@ download_project(PROJ		    vcglib_devel
                  ${UPDATE_DISCONNECTED_IF_AVAILABLE}
 )
 
-#Polyscope
-download_project(PROJ               POLYSCOPE
-                 GIT_REPOSITORY     https://github.com/nmwsharp/polyscope.git
+#libigl
+download_project(PROJ               LIBIGL
+                 GIT_REPOSITORY     https://github.com/libigl/libigl.git
                  GIT_TAG	    master
                  ${UPDATE_DISCONNECTED_IF_AVAILABLE}
 )
-add_subdirectory(${POLYSCOPE_SOURCE_DIR})
+set(LIBIGL_INCLUDE_DIR ${LIBIGL_SOURCE_DIR}/include)
+option(LIBIGL_WITH_OPENGL            "Use OpenGL"         ON)
+option(LIBIGL_WITH_OPENGL_GLFW       "Use GLFW"           ON)
+option(LIBIGL_WITH_OPENGL_GLFW_IMGUI "Use ImGui"          ON)
+find_package(LIBIGL REQUIRED QUIET)
+
+#Polyscope
+#download_project(PROJ               POLYSCOPE
+#                 GIT_REPOSITORY     https://github.com/nmwsharp/polyscope.git
+#                 GIT_TAG	    master
+#                 ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+#)
+#add_subdirectory(${POLYSCOPE_SOURCE_DIR})
+
+
 
 ##Eigen 3 NOTE: Eigen is required on the system the code is ran
 find_package(Eigen3 3.3 REQUIRED)
@@ -35,10 +49,12 @@ file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp ${CMAKE_CURRENT_SOURCE_D
 
 add_executable(${PROJECT_NAME} ${SOURCES} )
 
-
+set(LIBIGL_INCLUDE_DIR "/home/iason/Coding/Libraries/libigl/include")
 
 target_include_directories(${PROJECT_NAME}
         PRIVATE ${vcglib_devel_SOURCE_DIR}
+        PRIVATE ${LIBIGL_SOURCE_DIR}
+#        PRIVATE ${POLYSCOPE_SOURCE_DIR}
         )
 
 #Use C++17
@@ -48,7 +64,7 @@ else(MSVC)
         target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 endif(MSVC)
 
-target_link_libraries(${PROJECT_NAME} polyscope Eigen3::Eigen
+target_link_libraries(${PROJECT_NAME} Eigen3::Eigen igl::core igl::opengl igl::opengl_glfw igl::opengl_glfw_imgui
 )
 
 
